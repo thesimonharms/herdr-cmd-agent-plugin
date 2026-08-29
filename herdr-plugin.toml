@@ -1,0 +1,38 @@
+id = "cmd"
+name = "CommandCode"
+version = "1.0.0"
+min_herdr_version = "0.7.0"
+description = "Recognize CommandCode (cmd) as a Herdr agent — screen detection for idle/working/blocked plus HERDR_AGENT hint"
+platforms = ["linux", "macos", "windows"]
+
+# Startup hook ensures the detection manifest is installed on every Herdr launch.
+# It is idempotent and never overwrites a user-edited newer file without --force.
+[[startup]]
+command = ["sh", "scripts/ensure-manifest.sh"]
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["powershell", "-File", "scripts/ensure-manifest.ps1"]
+platforms = ["windows"]
+
+# Manual actions for users who prefer explicit control
+[[actions]]
+id = "install-manifest"
+title = "Install cmd agent detection"
+description = "Copy agent-detection/cmd.toml to ~/.config/herdr/agent-detection/cmd.toml and reload Herdr manifests"
+command = ["sh", "scripts/install.sh"]
+platforms = ["linux", "macos", "windows"]
+
+[[actions]]
+id = "uninstall-manifest"
+title = "Remove cmd agent detection"
+description = "Remove the local cmd.toml override and reload Herdr manifests"
+command = ["sh", "scripts/uninstall.sh"]
+platforms = ["linux", "macos", "windows"]
+
+[[actions]]
+id = "status"
+title = "Show cmd detection status"
+description = "Show active manifest source, versions, and whether HERDR_AGENT hint is needed"
+command = ["sh", "scripts/status.sh"]
+platforms = ["linux", "macos", "windows"]

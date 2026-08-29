@@ -1,0 +1,73 @@
+#!/usr/bin/env sh
+# herdr-cmd — run CommandCode (cmd) with Herdr lifecycle reporting.
+# Usage: herdr-cmd [cmd args...]  — drop-in replacement for `cmd` inside Herdr.
+# Falls back to plain `cmd` when not inside Herdr.
+set -eu
+HERDR_BIN="${HERDR_BIN_PATH:-herdr}"
+PANE_ID="${HERDR_PANE_ID:-}"
+
+if [ -z "$PANE_ID" ] || ! command -v "$HERDR_BIN" >/dev/null 2>&1; then
+  exec cmd "$@"
+fi
+
+# Report idle immediately, then monitor the pane in background.
+"$HERDR_BIN" pane report-agent "$PANE_ID" --source herdr:cmd --agent cmd --state idle 2>/dev/null || true
+
+# Background monitor: poll pane buffer every 0.5s and report working/blocked/idle.
+# Runs as a coprocess alongside cmd; killed when cmd exits.
+monitor() {
+  # Use node if available for better regex, else shell fallback.
+  if command -v node >/dev/null 2>&1 && [ -f "$(dirname "$0")/../scripts/monitor.js" ]; then
+    node "$(dirname "$0")/../scripts/monitor.js" "$PANE_ID" "$HERDR_BIN" &
+    MON_PID=$!
+  else
+    (
+      while kill -0 $$ 2>/dev/null; do
+        sleep 0.5
+        # shellcheck disable=SC2046
+        out=$("$HERDR_BIN" pane read "$PANE_ID" --source recent-unwrapped --lines 40 2>/dev/null | tail -n 40 || true)
+        state="idle"
+        # blocked has priority
+        if echo "$out" | grep -q "Do you trust the files in this folder\?"; then state="blocked"
+        elif echo "$out" | grep -q "Do you want to"; then state="blocked"
+        elif echo "$out" | grep -q "esc to interrupt"; then state="working"
+        elif echo "$out" | grep -q "◇.*…"; then state="working"
+        elif echo "$out" | grep -q "Ask your question"; then state="idle"
+        fi
+        "$HERDR_BIN" pane report-agent "$PANE_ID" --source herdr:cmd --agent cmd --state "$state" 2>/dev/null || true
+      done
+    ) &
+    MON_PID=$!
+  fi
+  # Ensure monitor is killed on exit
+  trap 'kill $MON_PID 2>/dev/null || true' EXIT INT TERM
+  wait $MON_PID 2>/dev/null || true
+}
+
+# Start monitor in background, then exec cmd (replaces shell, monitor dies with it)
+# We need to keep monitor alive alongside cmd, so run cmd in foreground and monitor concurrently.
+# Approach: run monitor loop in background, exec cmd, then clean up.
+(
+  # monitor loop — separate process group so it can be killed
+  while true; do
+    sleep 0.6
+    buf=$("$HERDR_BIN" pane read "$PANE_ID" --source recent-unwrapped --lines 60 2>/dev/null || true)
+    # crude classify
+    if echo "$buf" | grep -q "Do you trust the files in this folder"; then
+      "$HERDR_BIN" pane report-agent "$PANE_ID" --source herdr:cmd --agent cmd --state blocked 2>/dev/null || true
+    elif echo "$buf" | grep -q "Do you want to"; then
+      "$HERDR_BIN" pane report-agent "$PANE_ID" --source herdr:cmd --agent cmd --state blocked 2>/dev/null || true
+    elif echo "$buf" | grep -q "esc to interrupt"; then
+      "$HERDR_BIN" pane report-agent "$PANE_ID" --source herdr:cmd --agent cmd --state working 2>/dev/null || true
+    elif echo "$buf" | grep -q "◇.*…"; then
+      "$HERDR_BIN" pane report-agent "$PANE_ID" --source herdr:cmd --agent cmd --state working 2>/dev/null || true
+    elif echo "$buf" | grep -q "❯ Ask your question"; then
+      "$HERDR_BIN" pane report-agent "$PANE_ID" --source herdr:cmd --agent cmd --state idle 2>/dev/null || true
+    fi
+  done
+) &
+MON_BG=$!
+# Ensure monitor killed when cmd exits
+trap 'kill $MON_BG 2>/dev/null || true; "$HERDR_BIN" pane report-agent "$PANE_ID" --source herdr:cmd --agent cmd --state idle 2>/dev/null || true' EXIT INT TERM
+
+exec cmd "$@"

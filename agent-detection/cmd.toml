@@ -1,0 +1,134 @@
+id = "cmd"
+version = "1.0.0"
+min_engine_version = 1
+updated_at = "2026-08-29T00:00:00Z"
+aliases = ["commandcode", "command-code", "herdr:cmd"]
+
+# Cmd uses ink-based TUI. The shell reports as `cmd` (node) with HERDR_AGENT=cmd override.
+# Without HERDR_AGENT, herdr cannot map the node process to this manifest.
+
+# ── blocked ──────────────────────────────────────────────────────────
+
+# Trust dialog on first run in a new directory
+[[rules]]
+id = "trust_dialog"
+state = "blocked"
+priority = 990
+region = "whole_recent"
+visible_blocker = true
+contains = ["Do you trust the files in this folder?"]
+any = [
+  { contains = ["esc to exit"] },
+  { contains = ["enter to select"] },
+]
+
+# Permission prompt: Do you want to create/read/edit/run … ?
+# Observed:
+#   Do you want to create test_cmd_file.txt?
+#   ❯ 1. Yes
+#     2. Yes, allow all edits this session [shift+tab]
+#     3. No, tell Command Code what to do differently
+#   ↑/↓ navigate · enter select · Run cmd --yolo to bypass
+[[rules]]
+id = "permission_prompt"
+state = "blocked"
+priority = 985
+region = "whole_recent"
+visible_blocker = true
+contains = ["Do you want to"]
+any = [
+  { contains = ["1. Yes"] },
+  { contains = ["Yes, allow all"] },
+  { contains = ["tell Command Code"] },
+]
+all = [
+  { any = [{ contains = ["↑/↓"] }, { contains = ["navigate"] }] },
+  { any = [{ contains = ["enter select"] }, { contains = ["enter to select"] }] },
+]
+
+# Generic fallback for any Do you want to … with Yes/No options
+[[rules]]
+id = "generic_confirm"
+state = "blocked"
+priority = 980
+region = "whole_recent"
+visible_blocker = true
+contains = ["Do you want to"]
+any = [
+  { contains = ["Yes"] },
+  { contains = ["No,"] },
+]
+
+# Selection menu fallback (model picker, reasoning effort, etc.)
+[[rules]]
+id = "selection_menu"
+state = "blocked"
+priority = 300
+region = "whole_recent"
+visible_blocker = true
+any = [
+  { contains = ["↑/↓ navigate · enter to select · esc to go back"] },
+  { contains = ["↑/↓ navigate · enter to select · esc to cancel"] },
+  { contains = ["type to search · ↑/↓ navigate"] },
+]
+
+# ── working ──────────────────────────────────────────────────────────
+
+# Main working indicator: animated verb + esc to interrupt
+# Observed: ◇ Investigating…  esc to interrupt • 4s • ↓ 0
+# The Eg list contains ~40 verbs with trailing … (Pondering…, Investigating…, Building…, etc.)
+[[rules]]
+id = "status_esc_interrupt"
+state = "working"
+priority = 920
+region = "bottom_non_empty_lines(12)"
+visible_working = true
+contains = ["esc to interrupt"]
+
+# Diamond spinner with verb … (fallback when esc line wrapped)
+[[rules]]
+id = "diamond_working"
+state = "working"
+priority = 910
+region = "whole_recent"
+visible_working = true
+line_regex = ['^\s*◇\s+\S+…']
+
+# Braille spinner variant (⠶) used for streamed output
+[[rules]]
+id = "braille_working"
+state = "working"
+priority = 900
+region = "bottom_non_empty_lines(8)"
+visible_working = true
+line_regex = ['^\s*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠶]\s+\S']
+
+# ── idle ─────────────────────────────────────────────────────────────
+
+# Primary idle: the input box with ❯ Ask your question...
+[[rules]]
+id = "prompt_idle"
+state = "idle"
+priority = 850
+region = "bottom_non_empty_lines(6)"
+visible_idle = true
+contains = ["Ask your question..."]
+line_regex = ['^\s*❯\s+Ask your question']
+
+# Fallback idle: shortcuts hint visible only when idle
+[[rules]]
+id = "shortcuts_hint_idle"
+state = "idle"
+priority = 840
+region = "bottom_non_empty_lines(3)"
+visible_idle = true
+contains = ["? for shortcuts"]
+
+# After a turn completes, shows ✻ Worked for Xs
+[[rules]]
+id = "worked_idle"
+state = "idle"
+priority = 830
+region = "whole_recent"
+visible_idle = true
+line_regex = ['✻\s+Worked for\s+\d+s']
